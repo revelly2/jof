@@ -1,0 +1,9 @@
+node_modules/
+dataset/
+dataset_backup/
+runs/
+model/
+yolov8n.pt
+*.pt
+__pycache__/
+.env

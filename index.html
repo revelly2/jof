@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RiceGuard AI - YOLOv8 Crop Diagnostics & Dosage Dashboard</title>
+    <!-- Meta SEO and tags -->
+    <meta name="description" content="RiceGuard AI: Unified crop disease diagnosis using YOLOv8 deep learning ONNX runtime, interactive farm grid mapping, and precise pesticide/dilution calculations based on IRRI & PhilRice guidelines.">
+    <link rel="stylesheet" href="styles.css">
+    <!-- ONNX Runtime Web Library -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+</head>
+<body>
+
+    <div class="app-container unified-layout">
+        
+        <!-- Top Navigation Header -->
+        <header class="app-header">
+            <div class="brand">
+                <div class="brand-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                    </svg>
+                </div>
+                <div class="brand-name">RiceGuard AI</div>
+            </div>
+            
+            <div class="header-status-area">
+                <!-- YOLOv8 Model Status Badge -->
+                <div id="model-status-badge" class="model-status-badge status-loading">
+                    <span class="status-dot"></span>
+                    <span id="model-status-text">YOLOv8: Initializing Model...</span>
+                </div>
+                <!-- Weather Banner -->
+                <div id="weather-alert-pill" class="alert-banner info">
+                    <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2;"><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+                    <span id="header-weather-text">Weather: Monitoring...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Unified Two-Column Grid -->
+        <div class="dashboard-grid-container">
+            
+            <!-- LEFT COLUMN: Scanner & Image Viewport -->
+            <div class="left-column">
+                <div class="panel-container">
+                    <div class="panel-header">
+                        <h2 class="panel-title">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                            YOLOv8 Visual Viewfinder
+                        </h2>
+                        <button class="btn btn-secondary btn-sm" id="btn-toggle-camera">Use Live Camera</button>
+                    </div>
+
+                    <!-- Scan Canvas / Dropzone -->
+                    <div class="scan-box" id="drop-zone">
+                        <div class="scan-box-content" id="upload-prompt">
+                            <div class="scan-box-icon">
+                                <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            </div>
+                            <h4 style="margin-bottom:0.25rem;">Upload Infected Rice Photo</h4>
+                            <p style="font-size:0.75rem; color:var(--text-secondary);">Drag and drop, or click to browse</p>
+                            <p style="font-size:0.7rem; color:var(--text-muted); margin-top:0.5rem;">Supports JPG, PNG formats</p>
+                        </div>
+
+                        <video id="camera-stream" autoplay playsinline></video>
+
+                        <div class="scan-canvas-wrapper" id="canvas-container">
+                            <canvas id="scan-canvas"></canvas>
+                            <!-- Animated laser overlay -->
+                            <div class="laser-line" id="laser"></div>
+                        </div>
+                    </div>
+                    
+                    <input type="file" id="file-input" accept="image/*">
+
+                    <!-- Diagnostic Engine Selector -->
+                    <div class="engine-selection-panel" style="margin-top: 1rem; padding: 1.25rem; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem;">
+                            <span style="font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Diagnostic Engine Model</span>
+                            <span class="engine-badge" id="active-engine-badge">Roboflow Cloud Model</span>
+                        </div>
+                        <div class="engine-options-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem;">
+                            <button class="engine-btn active" data-engine="roboflow" id="btn-engine-roboflow" type="button" title="Runs cloud detection using your Roboflow Workflow API.">
+                                <div class="engine-btn-title">☁️ Roboflow API</div>
+                                <div class="engine-btn-desc">Cloud Deep Learning</div>
+                            </button>
+
+                            <button class="engine-btn" data-engine="yolov8" id="btn-engine-yolov8" type="button" style="display: none;" title="Runs local deep learning in the browser using the trained ONNX model.">
+                                <div class="engine-btn-title">⚡ YOLOv8 Local</div>
+                                <div class="engine-btn-desc">Browser ONNX Model</div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <input type="file" id="directory-input" webkitdirectory directory multiple style="display:none;">
+
+                    <div style="display:flex; gap:0.5rem; margin-top: 0.75rem; flex-wrap: wrap;">
+                        <button class="btn btn-primary" id="btn-process-scan" disabled style="flex-grow: 2; min-width: 140px;">Run Crop Diagnosis</button>
+                        <button class="btn btn-secondary" id="btn-batch-validate" type="button" style="flex-grow: 1; min-width: 130px; font-size: 0.8rem; padding: 0.6rem;" title="Runs local validations against a folder uploaded from your local storage.">Batch Validate Folder</button>
+                        <button class="btn btn-secondary" id="btn-scan-dataset" type="button" style="flex-grow: 1; min-width: 130px; font-size: 0.8rem; padding: 0.6rem;" title="Automatically scans every image inside the local dataset/ directory recursively.">Scan Dataset Folder</button>
+                        <button class="btn btn-secondary" id="btn-reset-scan" style="display:none; flex-grow: 1; padding: 0.6rem;">Reset</button>
+                    </div>
+                </div>
+
+                <!-- YOLOv8 Local Training Station -->
+                <div class="panel-container" style="margin-top: 1.5rem;">
+                    <div class="panel-header">
+                        <h2 class="panel-title">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M6.34 17.66l2.83-2.83M14.83 9.17l2.83-2.83"/></svg>
+                            YOLOv8 Local Training Station
+                        </h2>
+                        <span class="engine-badge" id="training-status-badge" style="background: rgba(255,255,255,0.05); color: var(--text-muted); border-color: rgba(255,255,255,0.05);">Idle</span>
+                    </div>
+                    
+                    <p style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4; margin-bottom: 0.85rem;">
+                        Train a new YOLOv8 object detection model on your local <strong>dataset/</strong> folder directly from the browser.
+                    </p>
+
+                    <div id="training-ui-container">
+                        <button class="btn btn-primary" id="btn-start-training" style="width:100%; padding:0.6rem; font-size:0.8rem; font-weight:700;">Start Model Training</button>
+                    </div>
+                </div>
+
+                <!-- Dataset Sample Presets -->
+                <div class="panel-container presets-container" style="margin-top: 1.5rem;">
+                    <h3 id="presets-title" style="font-size:0.95rem; font-weight:700; color: var(--text-secondary);">Choose a sample leaf dataset image to test:</h3>
+                    <div class="presets-grid" id="presets-tray">
+                        <!-- Loaded dynamically by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT COLUMN: Results, Grid Mapping, Calculator & Weather Safety -->
+            <div class="right-column" style="display:flex; flex-direction:column; gap:1.5rem;">
+                
+                <!-- Dynamic Diagnosis Area -->
+                <div class="panel-container">
+                    <h2 class="panel-title">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        Crop Analysis Results
+                    </h2>
+                    <div class="diagnosis-container" id="diagnosis-result-area">
+                        <div class="diagnosis-placeholder">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                            </svg>
+                            <h3>Scan Pending</h3>
+                            <p style="font-size:0.8rem; color:var(--text-muted); max-width: 250px; margin-top:0.25rem;">Load a sample photo or capture leaves to begin agricultural diagnosis.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Farm Area and Interactive Bounding Grid Map -->
+                <div class="panel-container">
+                    <div class="panel-header" style="width:100%;">
+                        <h3 class="panel-title">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                            Interactive Farm Mapping Grid
+                        </h3>
+                        <button class="btn btn-secondary btn-sm" id="btn-clear-map">Clear Grid</button>
+                    </div>
+                    
+                    <div class="grid-calculator-split">
+                        <div>
+                            <p class="grid-instructions" style="text-align: left; margin-bottom: 0.75rem; font-size: 0.8rem; line-height: 1.4;">Mark infected sections on your farm coordinates to recalculate dilution dosing dynamically.</p>
+                            <!-- Grid Canvas -->
+                            <canvas id="farm-grid-canvas" width="280" height="280"></canvas>
+                        </div>
+                        
+                        <div style="display:flex; flex-direction:column; gap:1.2rem;">
+                            <!-- Numeric Inputs -->
+                            <div class="form-group">
+                                <label class="form-label" for="farm-area-input">Total Farm Area</label>
+                                <div class="input-container">
+                                    <input type="number" id="farm-area-input" class="form-input" value="10000" min="10">
+                                    <span class="input-unit">m²</span>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="infected-area-input">Infected Area Size</label>
+                                <div class="input-container">
+                                    <input type="number" id="infected-area-input" class="form-input" value="1000" min="0">
+                                    <span class="input-unit">m²</span>
+                                </div>
+                            </div>
+
+                            <div class="slider-group">
+                                <div class="slider-label">
+                                    <span>Infection Ratio</span>
+                                    <span class="slider-val" id="text-infection-percentage">10.0%</span>
+                                </div>
+                                <input type="range" id="slider-infection-ratio" class="custom-slider" min="0" max="100" value="10">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dilution Calculations & Knapsack Dosing Outcomes -->
+                <div class="panel-container calc-results" style="margin-top:0;">
+                    <h3 style="font-size:1.05rem; font-weight:700; color:var(--text-primary); margin-bottom:0.5rem; display:flex; align-items:center; gap:0.5rem;">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                        Dosing Summary
+                    </h3>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; margin-top: 0.5rem;">
+                        <div class="calc-result-row">
+                            <span class="calc-result-label">Target Pest:</span>
+                            <span class="calc-result-val" id="calc-target-pest">Rice Blast</span>
+                        </div>
+                        <div class="calc-result-row">
+                            <span class="calc-result-label">Active Chemical:</span>
+                            <span class="calc-result-val highlight" id="calc-chemical-name">Tricyclazole</span>
+                        </div>
+                        <div class="calc-result-row">
+                            <span class="calc-result-label">Dosage Rate:</span>
+                            <span class="calc-result-val" id="calc-dosage-rate">400 ml / Ha</span>
+                        </div>
+                        <div class="calc-result-row">
+                            <span class="calc-result-label">Total Chemical:</span>
+                            <span class="calc-result-val highlight" id="calc-pesticide-volume">40.0 ml</span>
+                        </div>
+                        <div class="calc-result-row">
+                            <span class="calc-result-label">Spray Water:</span>
+                            <span class="calc-result-val" id="calc-water-volume">40.0 Liters</span>
+                        </div>
+                        <div class="calc-result-row">
+                            <span class="calc-result-label">Knapsack Tanks:</span>
+                            <span class="calc-result-val" id="calc-tank-count">2.5 Tanks</span>
+                        </div>
+                        <div class="calc-result-row" style="grid-column: span 2;">
+                            <span class="calc-result-label">Tank Concentration:</span>
+                            <span class="calc-result-val highlight" id="calc-tank-mix">16.0 ml per 16L Tank</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-top:0.75rem; font-size: 0.75rem; color:var(--text-muted); line-height: 1.4; background: rgba(0,0,0,0.2); padding: 0.75rem; border-radius: 8px;">
+                        <strong>Mixing Instruction:</strong> Mix <span id="calc-ratio-text" style="color:var(--color-accent); font-weight:700;">1.0 ml</span> of chemical for every <span style="color:#ffffff;">1 Liter</span> of clean water inside the sprayer. Fill the sprayer to 16L and agitate thoroughly.
+                    </div>
+
+                    <button class="btn btn-primary" id="btn-save-report" style="width:100%; margin-top:0.75rem;">Save Diagnostic Report</button>
+                </div>
+
+                <!-- Weather and Spray Safety Advisor -->
+                <div class="panel-container">
+                    <div class="panel-header" style="margin-bottom: 0.5rem;">
+                        <h3 class="panel-title">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.59 4.59A2 2 0 1 1 11 8H2m10.59 11.41A2 2 0 1 0 14 16H2m15.73-8.27A2.5 2.5 0 1 1 19.5 12H2"/></svg>
+                            Spray Safety & Weather Advisor
+                        </h3>
+                        <button class="btn btn-secondary btn-sm" id="btn-mock-weather">Regenerate Weather</button>
+                    </div>
+                    
+                    <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-top: 0.5rem;">
+                        <div class="weather-gauge-card" style="padding: 0.65rem;">
+                            <span style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase;">Wind Speed</span>
+                            <div class="weather-badge-icon" id="weather-wind-icon" style="font-size: 1.25rem; margin: 0.2rem 0;">💨</div>
+                            <span style="font-weight:700; font-size:0.95rem;" id="weather-wind-value">4.5 km/h</span>
+                        </div>
+                        
+                        <div class="weather-gauge-card" style="padding: 0.65rem;">
+                            <span style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase;">Rain Prob</span>
+                            <div class="weather-badge-icon" id="weather-rain-icon" style="font-size: 1.25rem; margin: 0.2rem 0;">🌧️</div>
+                            <span style="font-weight:700; font-size:0.95rem;" id="weather-rain-value">15%</span>
+                        </div>
+
+                        <div class="weather-gauge-card" style="padding: 0.65rem;">
+                            <span style="font-size:0.7rem; color:var(--text-secondary); text-transform:uppercase;">Temperature</span>
+                            <div class="weather-badge-icon" id="weather-temp-icon" style="font-size: 1.25rem; margin: 0.2rem 0;">☀️</div>
+                            <span style="font-weight:700; font-size:0.95rem;" id="weather-temp-value">28.5°C</span>
+                        </div>
+                    </div>
+
+                    <div class="safety-status-box safe" id="spray-safety-badge" style="margin-top:0.75rem; padding: 0.6rem;">
+                        Safe To Spray
+                    </div>
+                </div>
+
+                <!-- Personal protective equipment checklist -->
+                <div class="panel-container">
+                    <h3 class="panel-title">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        Chemical Application PPE Checklist
+                    </h3>
+                    
+                    <div class="symptoms-checkbox-list" style="margin-top:0.5rem; gap: 0.4rem;">
+                        <label class="symptom-checkbox-label">
+                            <input type="checkbox" checked class="ppe-check">
+                            <span style="font-size: 0.8rem;">Eye Goggles (Drift splash protection)</span>
+                        </label>
+                        <label class="symptom-checkbox-label">
+                            <input type="checkbox" checked class="ppe-check">
+                            <span style="font-size: 0.8rem;">Chemical Face Mask / N95 (Inhalation safety)</span>
+                        </label>
+                        <label class="symptom-checkbox-label">
+                            <input type="checkbox" class="ppe-check">
+                            <span style="font-size: 0.8rem;">Nitrile Gloves (Skin protection)</span>
+                        </label>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- BOTTOM ARCHIVE HISTORY DRAWER -->
+        <section class="panel-container history-panel" style="margin-top: 2rem;">
+            <div class="panel-header">
+                <h2 class="panel-title">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    Archived Diagnostic Reports Logs
+                </h2>
+            </div>
+            
+            <div class="dashboard-splits" style="grid-template-columns: 1.5fr 1fr; margin-top: 0.5rem; display: grid; gap: 1.5rem;">
+                <div class="history-list" id="history-container" style="max-height: 300px; overflow-y: auto;">
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width: 48px; height: 48px;">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/>
+                        </svg>
+                        <h3>No Saved Scans</h3>
+                        <p style="font-size:0.75rem; color:var(--text-muted);">Save a calculation to list it in this local storage log.</p>
+                    </div>
+                </div>
+
+                <div style="padding-left: 1.5rem; border-left: 1px solid var(--border-color);">
+                    <div id="active-planner-target" style="padding: 0.45rem; background: rgba(16,185,129,0.04); border-radius: 8px; border: 1px solid rgba(16,185,129,0.1); font-size: 0.8rem; font-weight:700; color:var(--color-accent); text-align:center;">
+                        Target: Default Treatment Plan
+                    </div>
+                    <div class="timeline-calendar" id="planner-timeline" style="margin-top: 1rem; font-size: 0.8rem;">
+                        <div class="timeline-step" style="padding-bottom: 0.75rem;">
+                            <div class="step-marker" style="width: 20px; height: 20px; font-size: 0.7rem;">1</div>
+                            <div class="step-content">
+                                <div class="step-header">
+                                    <span class="step-title">Initial Dosing Application</span>
+                                    <input type="checkbox" class="step-checkbox" id="plan-day-1">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="timeline-step" style="padding-bottom: 0.75rem;">
+                            <div class="step-marker" style="width: 20px; height: 20px; font-size: 0.7rem;">3</div>
+                            <div class="step-content">
+                                <div class="step-header">
+                                    <span class="step-title">Secondary Monitoring</span>
+                                    <input type="checkbox" class="step-checkbox" id="plan-day-3">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="timeline-step">
+                            <div class="step-marker" style="width: 20px; height: 20px; font-size: 0.7rem;">7</div>
+                            <div class="step-content">
+                                <div class="step-header">
+                                    <span class="step-title">Booster review spray</span>
+                                    <input type="checkbox" class="step-checkbox" id="plan-day-7">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- CITATIONS FOOTER -->
+        <footer class="references-panel" style="margin-top: 2rem;">
+            <div class="ref-title">Academic & Agribusiness Citations</div>
+            <ul class="ref-list">
+                <li class="ref-item">
+                    <span>[1]</span>
+                    <div><strong>IRRI Rice Knowledge Bank:</strong> Integrated Pest Management (IPM) guidelines. International Rice Research Institute.</div>
+                </li>
+                <li class="ref-item">
+                    <span>[2]</span>
+                    <div><strong>PhilRice Crop Division:</strong> Chemical tables, knapsack sprayer dilution factors, and safety guidelines.</div>
+                </li>
+                <li class="ref-item">
+                    <span>[3]</span>
+                    <div><strong>FAO Agrochemical Safety:</strong> Personal Protective Equipment (PPE) guidelines, wind threshold values, and environmental care.</div>
+                </li>
+            </ul>
+        </footer>
+
+    </div>
+
+    <!-- Load App Controller Logic -->
+    <script type="module" src="ui.js"></script>
+</body>
+</html>

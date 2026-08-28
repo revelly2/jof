@@ -1,0 +1,19 @@
+{
+  "name": "riceguard-ai",
+  "version": "1.0.0",
+  "description": "Rice Disease Diagnostics & Dosing Calculator",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "keywords": [
+    "agritech",
+    "rice",
+    "pest",
+    "pesticide",
+    "calculator"
+  ],
+  "author": "Antigravity",
+  "license": "ISC"
+}

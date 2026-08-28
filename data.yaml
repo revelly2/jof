@@ -1,0 +1,22 @@
+# YOLOv8 Dataset Configuration for Rice Leaf Diseases and Pests
+# This file tells YOLOv8 where your training and validation images are located.
+
+# 1. Dataset Root Directory and Subfolders
+# Place your dataset in a folder named 'dataset' inside the project directory.
+path: ./dataset       # Dataset root directory
+train: train/images   # Training images (relative to path)
+val: val/images       # Validation images (relative to path)
+test: test/images     # Test images (optional, relative to path)
+
+# 2. Number of Classes (Pest & Disease Labels)
+nc: 6
+
+# 3. Class Names Mapping
+names:
+  0: brown_planthopper
+  1: green_leafhopper
+  2: leaf_folder
+  3: rice_bug
+  4: stem_borer
+  5: whorl_maggot
+
