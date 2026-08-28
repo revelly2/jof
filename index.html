@@ -98,30 +98,12 @@
 
                     <div style="display:flex; gap:0.5rem; margin-top: 0.75rem; flex-wrap: wrap;">
                         <button class="btn btn-primary" id="btn-process-scan" disabled style="flex-grow: 2; min-width: 140px;">Run Crop Diagnosis</button>
-                        <button class="btn btn-secondary" id="btn-batch-validate" type="button" style="flex-grow: 1; min-width: 130px; font-size: 0.8rem; padding: 0.6rem;" title="Runs local validations against a folder uploaded from your local storage.">Batch Validate Folder</button>
-                        <button class="btn btn-secondary" id="btn-scan-dataset" type="button" style="flex-grow: 1; min-width: 130px; font-size: 0.8rem; padding: 0.6rem;" title="Automatically scans every image inside the local dataset/ directory recursively.">Scan Dataset Folder</button>
+
                         <button class="btn btn-secondary" id="btn-reset-scan" style="display:none; flex-grow: 1; padding: 0.6rem;">Reset</button>
                     </div>
                 </div>
 
-                <!-- YOLOv8 Local Training Station -->
-                <div class="panel-container" style="margin-top: 1.5rem;">
-                    <div class="panel-header">
-                        <h2 class="panel-title">
-                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M6.34 17.66l2.83-2.83M14.83 9.17l2.83-2.83"/></svg>
-                            YOLOv8 Local Training Station
-                        </h2>
-                        <span class="engine-badge" id="training-status-badge" style="background: rgba(255,255,255,0.05); color: var(--text-muted); border-color: rgba(255,255,255,0.05);">Idle</span>
-                    </div>
-                    
-                    <p style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4; margin-bottom: 0.85rem;">
-                        Train a new YOLOv8 object detection model on your local <strong>dataset/</strong> folder directly from the browser.
-                    </p>
 
-                    <div id="training-ui-container">
-                        <button class="btn btn-primary" id="btn-start-training" style="width:100%; padding:0.6rem; font-size:0.8rem; font-weight:700;">Start Model Training</button>
-                    </div>
-                </div>
 
                 <!-- Dataset Sample Presets -->
                 <div class="panel-container presets-container" style="margin-top: 1.5rem;">

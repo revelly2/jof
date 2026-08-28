@@ -80,8 +80,8 @@ function setupScannerUI() {
     const laser = document.getElementById('laser');
     
     const directoryInput = document.getElementById('directory-input');
-    const btnBatchValidate = document.getElementById('btn-batch-validate');
-    const btnScanDataset = document.getElementById('btn-scan-dataset');
+//    const btnBatchValidate = document.getElementById('btn-batch-validate');
+//    const btnScanDataset = document.getElementById('btn-scan-dataset');
     
     let isCameraActive = false;
     let localStream = null;
@@ -243,7 +243,7 @@ function setupScannerUI() {
     });
 
     // Hook up Directory Selection Trigger Button
-    btnBatchValidate.addEventListener('click', () => {
+//    btnBatchValidate.addEventListener('click', () => {
         if (!isCameraActive) {
             directoryInput.click();
         }
@@ -256,7 +256,7 @@ function setupScannerUI() {
     });
 
     if (btnScanDataset) {
-        btnScanDataset.addEventListener('click', () => {
+//        btnScanDataset.addEventListener('click', () => {
             if (!isCameraActive) {
                 runServerDatasetValidation();
             }
@@ -2035,7 +2035,7 @@ function updateTrainingUI(state) {
         container.innerHTML = `
             <button class="btn btn-primary" id="btn-start-training" style="width:100%; padding:0.6rem; font-size:0.8rem; font-weight:700;">Start Model Training</button>
         `;
-        document.getElementById('btn-start-training').addEventListener('click', triggerStartTraining);
+//        document.getElementById('btn-start-training').addEventListener('click', triggerStartTraining);
     } else if (state.status === 'training') {
         badge.textContent = 'Training...';
         badge.style.borderColor = 'var(--color-warning)';
@@ -2092,3 +2092,4 @@ function updateTrainingUI(state) {
         document.getElementById('btn-reset-trainer').addEventListener('click', triggerResetTrainer);
     }
 }
+
