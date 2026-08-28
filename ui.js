@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
     recalculateDosing();
     
     // Check local training status on startup
-    pollTrainingStatus();
+    // pollTrainingStatus(); // Disabled — training station removed for Vercel deployment
 });
 
 // ==========================================
@@ -242,12 +242,12 @@ function setupScannerUI() {
         `;
     });
 
-    // Hook up Directory Selection Trigger Button
-//    btnBatchValidate.addEventListener('click', () => {
-        if (!isCameraActive) {
-            directoryInput.click();
-        }
-    });
+    // Hook up Directory Selection Trigger Button (disabled for Vercel)
+    // btnBatchValidate.addEventListener('click', () => {
+    //     if (!isCameraActive) {
+    //         directoryInput.click();
+    //     }
+    // });
 
     directoryInput.addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
@@ -255,13 +255,13 @@ function setupScannerUI() {
         }
     });
 
-    if (btnScanDataset) {
-//        btnScanDataset.addEventListener('click', () => {
-            if (!isCameraActive) {
-                runServerDatasetValidation();
-            }
-        });
-    }
+    // if (btnScanDataset) {
+    //     btnScanDataset.addEventListener('click', () => {
+    //         if (!isCameraActive) {
+    //             runServerDatasetValidation();
+    //         }
+    //     });
+    // }
 }
 
 // Preset Leaf Vector graphics
