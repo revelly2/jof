@@ -122,7 +122,7 @@ export const state = {
     farmGridData: Array(100).fill(false), // 10x10 grid (false=healthy, true=infected)
     isPaintingOnGrid: false,
     currentWeatherData: { wind: 4.5, rain: 15, temp: 28.5 },
-    activeEngine: 'roboflow', // Options: 'roboflow', 'yolov8'
+    activeEngine: 'roboflow', // Options: 'roboflow' (YOLOv5), 'resnet' (ResNet18 classifier)
     yoloModelStatus: 'loading', 
     detectedBoxes: [] 
 };

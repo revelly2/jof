@@ -1,3 +1,8 @@
+// Trained Roboflow YOLOv5 detector for the 6 rice pest classes
+// (Common Rice Pests (Philippines) v11 - mAP50 97.5%, precision 96.9%, recall 97.2%)
+const ROBOFLOW_MODEL_URL = 'https://serverless.roboflow.com/common-rice-pests-philippines/11';
+const ROBOFLOW_API_KEY = process.env.ROBOFLOW_API_KEY || "HyFt0Ki9VlE29y54x3W6";
+
 module.exports = async function handler(req, res) {
     // Vercel Serverless Function entry point
     if (req.method !== 'POST') {
@@ -15,22 +20,13 @@ module.exports = async function handler(req, res) {
             return;
         }
 
-        console.log("Roboflow proxy: sending request to serverless workflows...");
-        const response = await fetch('https://serverless.roboflow.com/markdaluson30-gmail-com/workflows/general-segmentation-api-2', {
+        console.log("Roboflow proxy: sending request to hosted YOLOv5 pest model...");
+        const response = await fetch(`${ROBOFLOW_MODEL_URL}?api_key=${ROBOFLOW_API_KEY}&confidence=40&overlap=20`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/x-www-form-urlencoded'
             },
-            body: JSON.stringify({
-                api_key: "HyFt0Ki9VlE29y54x3W6",
-                inputs: {
-                    image: {
-                        type: "base64",
-                        value: base64Image
-                    },
-                    classes: "solution"
-                }
-            })
+            body: base64Image
         });
 
         const result = await response.json();

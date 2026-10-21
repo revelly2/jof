@@ -308,135 +308,16 @@ export function assessWeatherSafety(wind, rain, temp) {
 }
 
 /* ==========================================
-   YOLOv8 DEEP LEARNING UTILITIES
+   DETECTOR SIMULATION UTILITIES
    ========================================== */
 
 /**
- * Prepares canvas image data for YOLOv8 model inference.
- * Resizes the image to 640x640 and formats pixel channels to planar Float32Array [1, 3, 640, 640].
- * @param {HTMLCanvasElement} canvas - Original input image canvas
- * @returns {Float32Array} Normalized input tensor data
- */
-export function preprocessCanvasForYolo(canvas) {
-    const size = 640;
-    const offscreen = document.createElement('canvas');
-    offscreen.width = size;
-    offscreen.height = size;
-    const ctx = offscreen.getContext('2d');
-    ctx.drawImage(canvas, 0, 0, size, size);
-    
-    const imgData = ctx.getImageData(0, 0, size, size);
-    const data = imgData.data;
-    
-    // planar float array: CHW format (Channel, Height, Width)
-    const floatArray = new Float32Array(3 * size * size);
-    
-    for (let i = 0; i < size * size; i++) {
-        floatArray[i] = data[i * 4] / 255.0;               // Red Channel
-        floatArray[size * size + i] = data[i * 4 + 1] / 255.0; // Green Channel
-        floatArray[2 * size * size + i] = data[i * 4 + 2] / 255.0; // Blue Channel
-    }
-    
-    return floatArray;
-}
-
-/**
- * Parses raw YOLOv8 ONNX model output data and filters predictions via NMS.
- * @param {Float32Array} outputData - Raw output tensor data [1, 4+C, 8400]
- * @param {number} imgWidth - Target original image width for scaling
- * @param {number} imgHeight - Target original image height for scaling
- * @param {number} confThreshold - Minimum confidence score filter
- * @param {number} numClasses - Number of classes (5 in our dataset)
- * @returns {Array} List of suppressed bounding box detections
- */
-export function postprocessYoloOutput(outputData, imgWidth, imgHeight, confThreshold = 0.4, numClasses = 6) {
-    const numAnchors = 8400;
-    const boxes = [];
-    
-    // Map class indices to dataset IDs
-    const classNames = ['brown_planthopper', 'green_leafhopper', 'leaf_folder', 'rice_bug', 'stem_borer', 'whorl_maggot'];
-    
-    for (let col = 0; col < numAnchors; col++) {
-        let maxScore = -1;
-        let classId = -1;
-        
-        for (let cl = 0; cl < numClasses; cl++) {
-            const score = outputData[(4 + cl) * numAnchors + col];
-            if (score > maxScore) {
-                maxScore = score;
-                classId = cl;
-            }
-        }
-        
-        if (maxScore > confThreshold) {
-            const cx = outputData[0 * numAnchors + col];
-            const cy = outputData[1 * numAnchors + col];
-            const w = outputData[2 * numAnchors + col];
-            const h = outputData[3 * numAnchors + col];
-            
-            // Re-scale coordinates from 640x640 grid back to original crop aspect ratio
-            const x1 = (cx - w / 2) * (imgWidth / 640);
-            const y1 = (cy - h / 2) * (imgHeight / 640);
-            const boxW = w * (imgWidth / 640);
-            const boxH = h * (imgHeight / 640);
-            
-            boxes.push({
-                x: Math.max(0, x1),
-                y: Math.max(0, y1),
-                w: boxW,
-                h: boxH,
-                score: parseFloat(maxScore.toFixed(3)),
-                classId: classId,
-                pestId: classNames[classId]
-            });
-        }
-    }
-    
-    // Apply Non-Maximum Suppression (NMS) to eliminate duplicate bounding boxes
-    return applyNMS(boxes, 0.45);
-}
-
-function applyNMS(boxes, iouThreshold) {
-    boxes.sort((a, b) => b.score - a.score);
-    const selected = [];
-    const active = new Array(boxes.length).fill(true);
-    
-    for (let i = 0; i < boxes.length; i++) {
-        if (!active[i]) continue;
-        
-        selected.push(boxes[i]);
-        
-        for (let j = i + 1; j < boxes.length; j++) {
-            if (!active[j]) continue;
-            
-            if (calculateIOU(boxes[i], boxes[j]) > iouThreshold) {
-                active[j] = false;
-            }
-        }
-    }
-    return selected;
-}
-
-function calculateIOU(boxA, boxB) {
-    const xA = Math.max(boxA.x, boxB.x);
-    const yA = Math.max(boxA.y, boxB.y);
-    const xB = Math.min(boxA.x + boxA.w, boxB.x + boxB.w);
-    const yB = Math.min(boxA.y + boxA.h, boxB.y + boxB.h);
-    
-    const interArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
-    const boxAArea = boxA.w * boxA.h;
-    const boxBArea = boxB.w * boxB.h;
-    
-    return interArea / (boxAArea + boxBArea - interArea + 1e-6);
-}
-
-/**
- * Simulates YOLOv8 bounding boxes when running in local development simulation mode.
+ * Simulates detector bounding boxes when running in local development simulation mode.
  * Places realistic coordinates around leaf presets and uploaded leaf features.
  * @param {string} pestId - Predicted/selected pest target identifier
  * @param {number} imgWidth - Target image canvas width
  * @param {number} imgHeight - Target image canvas height
- * @returns {Array} Mock bounding boxes matching YOLOv8 output
+ * @returns {Array} Mock bounding boxes matching detector output
  */
 export function simulateYoloDetections(pestId, imgWidth, imgHeight) {
     const boxes = [];
