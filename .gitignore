@@ -7,3 +7,5 @@ yolov8n.pt
 *.pt
 __pycache__/
 .env
+datasets_rf/
+*.onnx.data

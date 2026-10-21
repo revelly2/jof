@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RiceGuard AI - YOLOv8 Crop Diagnostics & Dosage Dashboard</title>
+    <title>RiceGuard AI - Rice Pest Diagnostics & Dosage Dashboard</title>
     <!-- Meta SEO and tags -->
-    <meta name="description" content="RiceGuard AI: Unified crop disease diagnosis using YOLOv8 deep learning ONNX runtime, interactive farm grid mapping, and precise pesticide/dilution calculations based on IRRI & PhilRice guidelines.">
+    <meta name="description" content="RiceGuard AI: Unified crop disease diagnosis comparing a Roboflow YOLOv5 detector with a ResNet18 classifier, interactive farm grid mapping, and precise pesticide/dilution calculations based on IRRI & PhilRice guidelines.">
     <link rel="stylesheet" href="styles.css">
     <!-- ONNX Runtime Web Library -->
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
@@ -26,10 +26,10 @@
             </div>
             
             <div class="header-status-area">
-                <!-- YOLOv8 Model Status Badge -->
+                <!-- Detection Model Status Badge -->
                 <div id="model-status-badge" class="model-status-badge status-loading">
                     <span class="status-dot"></span>
-                    <span id="model-status-text">YOLOv8: Initializing Model...</span>
+                    <span id="model-status-text">Initializing Models...</span>
                 </div>
                 <!-- Weather Banner -->
                 <div id="weather-alert-pill" class="alert-banner info">
@@ -48,7 +48,7 @@
                     <div class="panel-header">
                         <h2 class="panel-title">
                             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                            YOLOv8 Visual Viewfinder
+                            Pest Detection Viewfinder
                         </h2>
                         <button class="btn btn-secondary btn-sm" id="btn-toggle-camera">Use Live Camera</button>
                     </div>
@@ -79,17 +79,17 @@
                     <div class="engine-selection-panel" style="margin-top: 1rem; padding: 1.25rem; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 12px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem;">
                             <span style="font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Diagnostic Engine Model</span>
-                            <span class="engine-badge" id="active-engine-badge">Roboflow Cloud Model</span>
+                            <span class="engine-badge" id="active-engine-badge">Roboflow YOLOv5 Model</span>
                         </div>
                         <div class="engine-options-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem;">
-                            <button class="engine-btn active" data-engine="roboflow" id="btn-engine-roboflow" type="button" title="Runs cloud detection using your Roboflow Workflow API.">
-                                <div class="engine-btn-title">☁️ Roboflow API</div>
-                                <div class="engine-btn-desc">Cloud Deep Learning</div>
+                            <button class="engine-btn active" data-engine="roboflow" id="btn-engine-roboflow" type="button" title="Runs the trained YOLOv5 rice pest detector on Roboflow.">
+                                <div class="engine-btn-title">☁️ Roboflow YOLOv5</div>
+                                <div class="engine-btn-desc">Trained Pest Detector</div>
                             </button>
 
-                            <button class="engine-btn" data-engine="yolov8" id="btn-engine-yolov8" type="button" style="display: none;" title="Runs local deep learning in the browser using the trained ONNX model.">
-                                <div class="engine-btn-title">⚡ YOLOv8 Local</div>
-                                <div class="engine-btn-desc">Browser ONNX Model</div>
+                            <button class="engine-btn" data-engine="resnet" id="btn-engine-resnet" type="button" title="Runs the pre-trained ResNet18 rice pest classifier on Roboflow on its own.">
+                                <div class="engine-btn-title">🧠 ResNet18</div>
+                                <div class="engine-btn-desc">Whole-Photo Pest Classifier</div>
                             </button>
                         </div>
                     </div>

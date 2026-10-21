@@ -4,6 +4,19 @@ const path = require('path');
 
 const PORT = process.env.PORT || 3000;
 
+// Trained Roboflow YOLOv5 detector for the 6 rice pest classes
+// (Common Rice Pests (Philippines) v11 - mAP50 97.5%, precision 96.9%, recall 97.2%)
+const ROBOFLOW_MODEL_URL = 'https://serverless.roboflow.com/common-rice-pests-philippines/11';
+const ROBOFLOW_API_KEY = process.env.ROBOFLOW_API_KEY || "HyFt0Ki9VlE29y54x3W6";
+
+// Pre-trained non-YOLO comparison model: ResNet18 image classifier (palay-peste/rice-pest-classifierr v3)
+const RESNET_MODEL_URL = 'https://serverless.roboflow.com/rice-pest-classifierr/3';
+
+const PROXY_ROUTES = {
+    '/api/diagnose-roboflow': { label: 'hosted YOLOv5 pest model', url: () => `${ROBOFLOW_MODEL_URL}?api_key=${ROBOFLOW_API_KEY}&confidence=40&overlap=20` },
+    '/api/classify-resnet': { label: 'hosted ResNet18 pest classifier', url: () => `${RESNET_MODEL_URL}?api_key=${ROBOFLOW_API_KEY}` }
+};
+
 const MIME_TYPES = {
     '.html': 'text/html',
     '.css': 'text/css',
@@ -11,7 +24,8 @@ const MIME_TYPES = {
     '.json': 'application/json',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
-    '.svg': 'image/svg+xml'
+    '.svg': 'image/svg+xml',
+    '.onnx': 'application/octet-stream'
 };
 
 const handler = (req, res) => {
@@ -19,8 +33,8 @@ const handler = (req, res) => {
     const ext = path.extname(filePath);
     let contentType = MIME_TYPES[ext] || 'application/octet-stream';
     
-    if (req.url === '/api/diagnose-roboflow') {
-        handleRoboflowProxy(req, res);
+    if (PROXY_ROUTES[req.url]) {
+        handleRoboflowProxy(req, res, PROXY_ROUTES[req.url]);
         return;
     }
 
@@ -48,7 +62,7 @@ const handler = (req, res) => {
     });
 };
 
-async function handleRoboflowProxy(req, res) {
+async function handleRoboflowProxy(req, res, route) {
     if (req.method !== 'POST') {
         res.writeHead(405, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Method Not Allowed' }));
@@ -70,22 +84,13 @@ async function handleRoboflowProxy(req, res) {
                 return;
             }
 
-            console.log("Roboflow proxy: sending request to serverless workflows...");
-            const response = await fetch('https://serverless.roboflow.com/markdaluson30-gmail-com/workflows/general-segmentation-api-2', {
+            console.log(`Roboflow proxy: sending request to ${route.label}...`);
+            const response = await fetch(route.url(), {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/x-www-form-urlencoded'
                 },
-                body: JSON.stringify({
-                    api_key: "HyFt0Ki9VlE29y54x3W6",
-                    inputs: {
-                        image: {
-                            type: "base64",
-                            value: base64Image
-                        },
-                        classes: "solution"
-                    }
-                })
+                body: base64Image
             });
 
             const result = await response.json();

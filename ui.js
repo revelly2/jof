@@ -8,14 +8,12 @@ import {
     classifyImageColorSignature, 
     calculateDosing, 
     assessWeatherSafety,
-    preprocessCanvasForYolo,
-    postprocessYoloOutput,
     simulateYoloDetections
 } from './logic.js';
 
 // Initialize Layer 3
 document.addEventListener('DOMContentLoaded', () => {
-    loadYoloModel();
+    setModelStatusReady();
     setupScannerUI();
     setupCalculatorUI();
     setupWeatherAdvisorUI();
@@ -30,38 +28,72 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ==========================================
-// ROBOFLOW API CLIENT CONFIGURATOR
+// DIAGNOSTIC MODELS (both hosted on Roboflow, called through the local proxy)
 // ==========================================
-async function loadYoloModel() {
+function setModelStatusReady() {
     const badge = document.getElementById('model-status-badge');
     const text = document.getElementById('model-status-text');
-    const yolov8Btn = document.getElementById('btn-engine-yolov8');
-    if (!badge || !text) return;
-    
-    try {
-        badge.className = 'model-status-badge status-loading';
-        text.textContent = 'YOLOv8: Loading local model...';
-        
-        // Load local YOLOv8 model from folder using ONNX Runtime
-        window.yoloSession = await ort.InferenceSession.create('./model/best.onnx');
-        
+    if (badge && text) {
         badge.className = 'model-status-badge status-loaded';
-        text.textContent = 'YOLOv8: Ready (best.onnx)';
-        state.yoloModelStatus = 'loaded';
-        
-        // Reveal YOLOv8 local engine selection button in UI
-        if (yolov8Btn) {
-            yolov8Btn.style.display = 'block';
-        }
-    } catch (e) {
-        console.warn("Failed to load local best.onnx, falling back to Roboflow Integration:", e);
-        state.yoloModelStatus = 'loaded';
-        badge.className = 'model-status-badge status-loaded';
-        text.textContent = 'Roboflow: Ready (general-segmentation-api-2)';
-        if (yolov8Btn) {
-            yolov8Btn.style.display = 'none';
-        }
+        text.textContent = 'Ready: Roboflow YOLOv5 + ResNet18';
     }
+}
+
+// Pre-trained non-YOLO comparison model: ResNet18 classifier (names the pest in the photo, no boxes)
+async function runResnet18Classifier(canvas) {
+    const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
+    const response = await fetch('/api/classify-resnet', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ image: base64Image })
+    });
+    
+    if (!response.ok) {
+        throw new Error("ResNet18 proxy returned status " + response.status);
+    }
+    
+    const result = await response.json();
+    const top = (result.predictions || [])[0];
+    if (!top) throw new Error("ResNet18 returned no prediction");
+    
+    // Its classes include "Steam Borer" (sic) plus two pests outside our dataset (Black Bug, Rice Gall Midge)
+    const pestId = top.class.toLowerCase().replace('steam', 'stem').replace(/[\s-]+/g, '_');
+    return {
+        pestId: PEST_DATASET[pestId] ? pestId : null,
+        label: top.class,
+        score: top.confidence
+    };
+}
+
+// Trained Roboflow YOLOv5 rice pest detector, called through the /api/diagnose-roboflow proxy
+async function runRoboflowYolov5(canvas) {
+    const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
+    const response = await fetch('/api/diagnose-roboflow', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ image: base64Image })
+    });
+    
+    if (!response.ok) {
+        throw new Error("Roboflow proxy returned status " + response.status);
+    }
+    
+    const result = await response.json();
+    return (result.predictions || [])
+        .map(pred => ({
+            // Roboflow coordinates are center-based: convert to top-left
+            x: Math.max(0, pred.x - pred.width / 2),
+            y: Math.max(0, pred.y - pred.height / 2),
+            w: pred.width,
+            h: pred.height,
+            score: pred.confidence,
+            pestId: (pred.class || "").toLowerCase().replace(/[\s-]+/g, '_')
+        }))
+        .filter(box => PEST_DATASET[box.pestId]);
 }
 
 // ==========================================
@@ -193,8 +225,8 @@ function setupScannerUI() {
             const selectedEngine = btn.dataset.engine;
             state.activeEngine = selectedEngine;
             
-            let label = "Roboflow Cloud Model";
-            if (selectedEngine === 'yolov8') label = "YOLOv8 Deep Learning (Local ONNX)";
+            let label = "Roboflow YOLOv5 Model";
+            if (selectedEngine === 'resnet') label = "ResNet18 Classifier Model";
             
             activeEngineBadge.textContent = label;
             
@@ -548,174 +580,78 @@ async function runCanvasAnalysis() {
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     
     // Call Layer 2 Multi-Engine Heuristic Classifier
-    // In heuristic modes, we use the selected engine. For YOLOv8 mode, we can use 'ensemble' classifier score as the predictor fallback.
-    // In heuristic modes, we use the selected engine. For Roboflow mode, we can use 'ensemble' classifier score as the predictor fallback.
-    const heuristicEngine = state.activeEngine === 'roboflow' ? 'ensemble' : state.activeEngine;
+    // In heuristic modes, we use the selected engine. For the deep learning modes, the 'ensemble' classifier score is the predictor fallback.
+    const isModelEngine = state.activeEngine === 'roboflow' || state.activeEngine === 'resnet';
+    const heuristicEngine = isModelEngine ? 'ensemble' : state.activeEngine;
     const classification = classifyImageColorSignature(imgData.data, canvas.width, canvas.height, heuristicEngine);
-    
+
     let isCustomUpload = !document.querySelector('.preset-card.selected');
-    
-    // 2. RUN DEEP LEARNING (Roboflow Cloud API / YOLOv8 Local) OR HEURISTIC METHOD
-    if (state.activeEngine === 'roboflow' || state.activeEngine === 'yolov8') {
-        let boxes = [];
-        
-        if (state.activeEngine === 'yolov8') {
-            if (state.yoloModelStatus === 'loaded' && window.yoloSession) {
-                try {
-                    // Show scanning indicator in status badge
-                    const badge = document.getElementById('model-status-badge');
-                    const text = document.getElementById('model-status-text');
-                    if (badge && text) {
-                        badge.className = 'model-status-badge status-loading';
-                        text.textContent = 'YOLOv8: Running Local Inference...';
-                    }
-                    
-                    const inputData = preprocessCanvasForYolo(canvas);
-                    const inputTensor = new ort.Tensor('float32', inputData, [1, 3, 640, 640]);
-                    const outputMap = await window.yoloSession.run({ images: inputTensor });
-                    const outputTensor = outputMap[Object.keys(outputMap)[0]];
-                    boxes = postprocessYoloOutput(outputTensor.data, canvas.width, canvas.height, 0.45);
-                    
-                    if (badge && text) {
-                        badge.className = 'model-status-badge status-loaded';
-                        text.textContent = 'YOLOv8: Ready (best.onnx)';
-                    }
-                } catch (err) {
-                    console.error("Local YOLOv8 inference failed, falling back to simulated detections", err);
-                    const predictedId = isCustomUpload ? classification.detectedPestId : (state.selectedPest ? state.selectedPest.id : classification.detectedPestId);
-                    boxes = simulateYoloDetections(predictedId, canvas.width, canvas.height);
-                }
-            } else {
-                const predictedId = isCustomUpload ? classification.detectedPestId : (state.selectedPest ? state.selectedPest.id : classification.detectedPestId);
-                boxes = simulateYoloDetections(predictedId, canvas.width, canvas.height);
-            }
-        } else {
-            // Roboflow Cloud API path
-            try {
-                // Get base64 representation of canvas
-                const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
-                
-                // Show scanning indicator in console log/badge
-                const badge = document.getElementById('model-status-badge');
-                const text = document.getElementById('model-status-text');
-                if (badge && text) {
-                    badge.className = 'model-status-badge status-loading';
-                    text.textContent = 'Roboflow: Running Cloud Inference...';
-                }
-                
-                // Call local node proxy
-                const response = await fetch('/api/diagnose-roboflow', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ image: base64Image })
-                });
-                
-                if (!response.ok) {
-                    throw new Error("Roboflow proxy returned status " + response.status);
-                }
-                
-                const result = await response.json();
-                
-                if (badge && text) {
-                    badge.className = 'model-status-badge status-loaded';
-                    text.textContent = 'Roboflow: Cloud Inference Complete';
-                }
-                
-                // Parse predictions recursively
-                function findPredictions(obj) {
-                    if (!obj || typeof obj !== 'object') return null;
-                    if (Array.isArray(obj.predictions)) return obj.predictions;
-                    for (const key of Object.keys(obj)) {
-                        const found = findPredictions(obj[key]);
-                        if (found) return found;
-                    }
-                    return null;
-                }
-                
-                const rawPredictions = findPredictions(result) || [];
-                
-                // Check if there is an annotated image in outputs
-                const outputStep = result.outputs?.[0];
-                if (outputStep?.annotated_image?.value) {
-                    await new Promise((resolve) => {
-                        const img = new Image();
-                        img.onload = () => {
-                            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                            resolve();
-                        };
-                        img.onerror = () => resolve();
-                        img.src = `data:image/jpeg;base64,${outputStep.annotated_image.value}`;
-                    });
-                }
-                
-                rawPredictions.forEach(pred => {
-                    // Roboflow coordinates are center-based: convert to top-left
-                    const w = pred.width || 80;
-                    const h = pred.height || 80;
-                    const x = (pred.x - w / 2);
-                    const y = (pred.y - h / 2);
-                    
-                    // Map class: if generic, resolve via pixel heuristic
-                    let pestId = (pred.class || "").toLowerCase().replace(/\s+/g, '_');
-                    const CLASS_KEYS = ['brown_planthopper', 'green_leafhopper', 'leaf_folder', 'rice_bug', 'stem_borer', 'whorl_maggot'];
-                    
-                    if (!CLASS_KEYS.includes(pestId)) {
-                        // Extract bounding box from canvas to run heuristic on it
-                        try {
-                            const tempCanvas = document.createElement('canvas');
-                            tempCanvas.width = Math.max(1, w);
-                            tempCanvas.height = Math.max(1, h);
-                            const tempCtx = tempCanvas.getContext('2d');
-                            
-                            tempCtx.drawImage(canvas, Math.max(0, x), Math.max(0, y), Math.min(canvas.width - x, w), Math.min(canvas.height - y, h), 0, 0, tempCanvas.width, tempCanvas.height);
-                            const subImgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-                            
-                            const subClassification = classifyImageColorSignature(subImgData.data, tempCanvas.width, tempCanvas.height, 'ensemble');
-                            pestId = subClassification.detectedPestId;
-                        } catch (e) {
-                            pestId = classification.detectedPestId;
-                        }
-                    }
-                    
-                    boxes.push({
-                        x: Math.max(0, x),
-                        y: Math.max(0, y),
-                        w: w,
-                        h: h,
-                        score: pred.confidence || 0.9,
-                        pestId: pestId
-                    });
-                });
-                
-            } catch (err) {
-                console.error("Roboflow cloud inference failed, running local heuristic ensemble fallback", err);
-                const predictedId = isCustomUpload ? classification.detectedPestId : state.selectedPest.id;
-                boxes = simulateYoloDetections(predictedId, canvas.width, canvas.height);
-                
-                const badge = document.getElementById('model-status-badge');
-                const text = document.getElementById('model-status-text');
-                if (badge && text) {
-                    badge.className = 'model-status-badge status-failed';
-                    text.textContent = 'Roboflow: Offline Fallback Active';
-                }
-            }
+
+    // 2. RUN DEEP LEARNING (Roboflow YOLOv5 detector / ResNet18 classifier) OR HEURISTIC METHOD
+    if (isModelEngine) {
+        const badge = document.getElementById('model-status-badge');
+        const text = document.getElementById('model-status-text');
+        const primaryIsResnet = state.activeEngine === 'resnet';
+        const primaryName = primaryIsResnet ? 'ResNet18' : 'Roboflow';
+
+        if (badge && text) {
+            badge.className = 'model-status-badge status-loading';
+            text.textContent = `${primaryName}: Running Cloud Inference...`;
         }
-        
+
+        // Each mode runs only its own model
+        const [primary] = await Promise.allSettled([
+            primaryIsResnet ? runResnet18Classifier(canvas) : runRoboflowYolov5(canvas)
+        ]);
+
+        const primaryFailed = primary.status === 'rejected';
+        if (primaryFailed) {
+            console.error(`${primaryName} inference failed, running local heuristic ensemble fallback`, primary.reason);
+        }
+
+        if (badge && text) {
+            badge.className = primaryFailed ? 'model-status-badge status-failed' : 'model-status-badge status-loaded';
+            text.textContent = primaryFailed ? `${primaryName}: Offline Fallback Active` : `${primaryName}: Inference Complete`;
+        }
+
+        const yoloBoxes = !primaryIsResnet && !primaryFailed ? primary.value : null;
+        const resnetResult = primaryIsResnet && !primaryFailed ? primary.value : null;
+
+        if (primaryIsResnet) {
+            // ResNet18 names the pest for the whole photo but has no boxes,
+            // so severity comes from the leaf colour analysis instead of box coverage
+            state.detectedBoxes = [];
+            const resnetPestId = resnetResult && resnetResult.pestId ? resnetResult.pestId : null;
+            state.selectedPest = PEST_DATASET[resnetPestId || classification.detectedPestId];
+
+            const infectionPercent = measureLeafInfection(imgData, state.selectedPest, false);
+            setInfectionInputs(infectionPercent);
+
+            const confidenceScore = resnetPestId ? Math.round(resnetResult.score * 100) : classification.confidence;
+            renderDiagnosisResults(state.selectedPest, infectionPercent, confidenceScore, classification.breakdown);
+            if (resnetResult) {
+                const name = resnetPestId ? PEST_DATASET[resnetPestId].name : resnetResult.label;
+                drawWholeImageLabel(canvas, `${name} [ResNet18: ${Math.round(resnetResult.score * 100)}%]`);
+            }
+            recalculateDosing();
+            return;
+        }
+
+        let boxes = yoloBoxes || [];
+
         // If Roboflow succeeded but found no objects, run fallback to classify image
         if (boxes.length === 0) {
             const predictedId = isCustomUpload ? classification.detectedPestId : (state.selectedPest ? state.selectedPest.id : classification.detectedPestId);
             boxes = simulateYoloDetections(predictedId, canvas.width, canvas.height);
         }
-        
+
         state.detectedBoxes = boxes;
-        
+
         // Compute Dynamic Infection Rate based on Bounding Boxes Area Coverage
         let totalBoxArea = 0;
         let winnerPestId = 'brown_planthopper';
         let maxBoxConf = -1;
-        
+
         boxes.forEach(box => {
             totalBoxArea += box.w * box.h;
             if (box.score > maxBoxConf) {
@@ -723,7 +659,7 @@ async function runCanvasAnalysis() {
                 winnerPestId = box.pestId;
             }
         });
-        
+
         // Scale visual bounding box occupancy ratio to appropriate farm grid infection rate (2.5% to 65.0%)
         let infectionPercent = 10.0;
         const totalArea = canvas.width * canvas.height;
@@ -734,117 +670,130 @@ async function runCanvasAnalysis() {
             infectionPercent = Math.random() * 10 + 5;
         }
         infectionPercent = parseFloat(infectionPercent.toFixed(1));
-        
+
         // Update active selection pest state
         state.selectedPest = PEST_DATASET[winnerPestId];
-        
+
         // Render inputs and trigger math calculations in calculator inputs
-        document.getElementById('infected-area-input').value = Math.round((infectionPercent / 100) * parseFloat(document.getElementById('farm-area-input').value));
-        document.getElementById('slider-infection-ratio').value = Math.round(infectionPercent);
-        document.getElementById('text-infection-percentage').textContent = infectionPercent + '%';
-        
+        setInfectionInputs(infectionPercent);
+
         // Display results & confidence score (highest bounding box percentage score)
         const confidenceScore = maxBoxConf > 0 ? Math.round(maxBoxConf * 100) : classification.confidence;
         renderDiagnosisResults(state.selectedPest, infectionPercent, confidenceScore, classification.breakdown);
-        
+
         // Draw bounding boxes on top of the original image
-        drawYoloBoundingBoxes(canvas, boxes);
+        drawYoloBoundingBoxes(canvas, boxes, 'YOLOv5');
         recalculateDosing();
-        
+
     } else {
         // Clear bounding boxes when running pixel-level heuristic highlight masking
         state.detectedBoxes = [];
-        
+
         if (isCustomUpload) {
             state.selectedPest = PEST_DATASET[classification.detectedPestId];
         }
-        
-        const target = state.selectedPest.colorProfile;
-        const data = imgData.data;
-        let infectedPixels = 0;
-        let healthyGreenPixels = 0;
-        
-        for (let i = 0; i < data.length; i += 4) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            
-            const maxVal = Math.max(r, g, b);
-            const minVal = Math.min(r, g, b);
-            const saturation = maxVal - minVal;
-            const intensity = (r + g + b) / 3;
-            
-            if (saturation < 25 || intensity < 30) {
-                continue; 
-            }
-            
-            const isGreen = g > r * 1.1 && g > b * 1.1 && g > 40;
-            
-            // Layered visual highlighter feedback
-            let isInfected = false;
-            if (state.activeEngine === 'contrast') {
-                const sumP = r + g + b;
-                const sumT = target.r + target.g + target.b;
-                if (sumP > 0 && sumT > 0) {
-                    const pr = r / sumP;
-                    const pg = g / sumP;
-                    const pb = b / sumP;
-                    const tr = target.r / sumT;
-                    const tg = target.g / sumT;
-                    const tb = target.b / sumT;
-                    const distChromatic = Math.sqrt(
-                        Math.pow(pr - tr, 2) +
-                        Math.pow(pg - tg, 2) +
-                        Math.pow(pb - tb, 2)
-                    );
-                    isInfected = distChromatic < 0.075;
-                }
-            } else {
-                const dist = Math.sqrt(
-                    Math.pow(r - target.r, 2) +
-                    Math.pow(g - target.g, 2) +
-                    Math.pow(b - target.b, 2)
-                );
-                isInfected = dist < target.tolerance;
-            }
-            
-            if (isInfected) {
-                infectedPixels++;
-                data[i] = Math.min(255, r + 110);
-                data[i + 1] = Math.max(0, g - 60);
-                data[i + 2] = Math.max(0, b - 60);
-            } else if (isGreen) {
-                healthyGreenPixels++;
-            }
-        }
-        
+
+        const infectionPercent = measureLeafInfection(imgData, state.selectedPest, true);
         ctx.putImageData(imgData, 0, 0);
-        
-        let totalLeafPixels = healthyGreenPixels + infectedPixels;
-        let infectionPercent = 10.0;
-        
-        if (totalLeafPixels > 0) {
-            infectionPercent = (infectedPixels / totalLeafPixels) * 100;
-            infectionPercent = Math.max(3.5, Math.min(38.5, infectionPercent * 1.6));
-        } else {
-            infectionPercent = Math.random() * 15 + 10;
-        }
-        
-        infectionPercent = parseFloat(infectionPercent.toFixed(1));
-        
-        document.getElementById('infected-area-input').value = Math.round((infectionPercent / 100) * parseFloat(document.getElementById('farm-area-input').value));
-        document.getElementById('slider-infection-ratio').value = Math.round(infectionPercent);
-        document.getElementById('text-infection-percentage').textContent = infectionPercent + '%';
-        
+        setInfectionInputs(infectionPercent);
+
         renderDiagnosisResults(state.selectedPest, infectionPercent, classification.confidence, classification.breakdown);
         recalculateDosing();
     }
 }
 
+function setInfectionInputs(infectionPercent) {
+    document.getElementById('infected-area-input').value = Math.round((infectionPercent / 100) * parseFloat(document.getElementById('farm-area-input').value));
+    document.getElementById('slider-infection-ratio').value = Math.round(infectionPercent);
+    document.getElementById('text-infection-percentage').textContent = infectionPercent + '%';
+}
+
 /**
- * Overlay YOLOv8 style bounding box targets onto the canvas view.
+ * Estimates infected leaf area from pixels matching the pest's colour profile.
+ * @param {ImageData} imgData - Canvas pixels
+ * @param {Object} pest - PEST_DATASET entry whose colorProfile is matched
+ * @param {boolean} highlight - Tint matching pixels red in imgData (heuristic mode visual feedback)
+ * @returns {number} Infection percentage
  */
-function drawYoloBoundingBoxes(canvas, boxes) {
+function measureLeafInfection(imgData, pest, highlight) {
+    const target = pest.colorProfile;
+    const data = imgData.data;
+    let infectedPixels = 0;
+    let healthyGreenPixels = 0;
+
+    for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+
+        const maxVal = Math.max(r, g, b);
+        const minVal = Math.min(r, g, b);
+        const saturation = maxVal - minVal;
+        const intensity = (r + g + b) / 3;
+
+        if (saturation < 25 || intensity < 30) {
+            continue;
+        }
+
+        const isGreen = g > r * 1.1 && g > b * 1.1 && g > 40;
+
+        // Layered visual highlighter feedback
+        let isInfected = false;
+        if (state.activeEngine === 'contrast') {
+            const sumP = r + g + b;
+            const sumT = target.r + target.g + target.b;
+            if (sumP > 0 && sumT > 0) {
+                const pr = r / sumP;
+                const pg = g / sumP;
+                const pb = b / sumP;
+                const tr = target.r / sumT;
+                const tg = target.g / sumT;
+                const tb = target.b / sumT;
+                const distChromatic = Math.sqrt(
+                    Math.pow(pr - tr, 2) +
+                    Math.pow(pg - tg, 2) +
+                    Math.pow(pb - tb, 2)
+                );
+                isInfected = distChromatic < 0.075;
+            }
+        } else {
+            const dist = Math.sqrt(
+                Math.pow(r - target.r, 2) +
+                Math.pow(g - target.g, 2) +
+                Math.pow(b - target.b, 2)
+            );
+            isInfected = dist < target.tolerance;
+        }
+
+        if (isInfected) {
+            infectedPixels++;
+            if (highlight) {
+                data[i] = Math.min(255, r + 110);
+                data[i + 1] = Math.max(0, g - 60);
+                data[i + 2] = Math.max(0, b - 60);
+            }
+        } else if (isGreen) {
+            healthyGreenPixels++;
+        }
+    }
+
+    let totalLeafPixels = healthyGreenPixels + infectedPixels;
+    let infectionPercent = 10.0;
+
+    if (totalLeafPixels > 0) {
+        infectionPercent = (infectedPixels / totalLeafPixels) * 100;
+        infectionPercent = Math.max(3.5, Math.min(38.5, infectionPercent * 1.6));
+    } else {
+        infectionPercent = Math.random() * 15 + 10;
+    }
+
+    return parseFloat(infectionPercent.toFixed(1));
+}
+
+/**
+ * Overlay the primary model's bounding boxes onto the canvas view.
+ */
+function drawYoloBoundingBoxes(canvas, boxes, engineLabel = 'YOLOv5') {
     const ctx = canvas.getContext('2d');
     
     boxes.forEach(box => {
@@ -860,16 +809,36 @@ function drawYoloBoundingBoxes(canvas, boxes) {
         
         // Draw tag badge
         ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
-        const label = `${pest.name} [YOLOv8: ${Math.round(box.score * 100)}%]`;
+        const label = `${pest.name} [${engineLabel}: ${Math.round(box.score * 100)}%]`;
         ctx.font = 'bold 11px sans-serif';
         const textWidth = ctx.measureText(label).width;
-        
+
         ctx.fillRect(box.x - 1.5, box.y - 22, textWidth + 12, 22);
-        
+
         // Write text label inside tag
         ctx.fillStyle = '#ffffff';
         ctx.fillText(label, box.x + 5, box.y - 7);
     });
+}
+
+/**
+ * Frames the whole canvas for a classifier result: the prediction covers the entire photo, not a located pest.
+ */
+function drawWholeImageLabel(canvas, label) {
+    const ctx = canvas.getContext('2d');
+    const inset = 2;
+
+    ctx.strokeStyle = '#a855f7';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(inset, inset, canvas.width - inset * 2, canvas.height - inset * 2);
+
+    ctx.font = 'bold 11px sans-serif';
+    const textWidth = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(168, 85, 247, 0.9)';
+    ctx.fillRect(inset, inset, textWidth + 12, 22);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(label, inset + 6, inset + 15);
 }
 
 function renderDiagnosisResults(pest, severityPercent, confidenceScore = null, breakdown = null) {
@@ -912,7 +881,8 @@ function renderDiagnosisResults(pest, severityPercent, confidenceScore = null, b
             </div>
             
             <p style="font-size:0.85rem; color:var(--text-secondary); line-height:1.5;">${pest.description}</p>
-            
+
+
             <!-- Dynamic engine breakdown chart visualization -->
             ${generateBreakdownRowsHtml(breakdown, pest.id)}
             
@@ -948,9 +918,9 @@ function generateBreakdownRowsHtml(breakdown, winnerId) {
     let scoresMap = breakdown.ensembleScores;
     let engineLabel = "Ensemble Mode";
     
-    if (state.activeEngine === 'yolov8') {
+    if (state.activeEngine === 'roboflow' || state.activeEngine === 'resnet') {
         scoresMap = breakdown.ensembleScores;
-        engineLabel = "YOLOv8 Deep Learning (Consensus)";
+        engineLabel = "Color Heuristic Ensemble (reference)";
     } else if (state.activeEngine === 'rgb') {
         scoresMap = breakdown.rgbScores;
         engineLabel = "RGB Profile Matching";
@@ -1570,28 +1540,14 @@ async function runBatchDirectoryValidation(fileList) {
             const startInf = performance.now();
             let predictedClassId = -1;
 
-            if (state.activeEngine === 'yolov8') {
-                if (state.yoloModelStatus === 'loaded' && window.yoloSession) {
-                    const inputData = preprocessCanvasForYolo(offscreenCanvas);
-                    const inputTensor = new ort.Tensor('float32', inputData, [1, 3, 640, 640]);
-                    const outputMap = await window.yoloSession.run({ images: inputTensor });
-                    const outputTensor = outputMap[Object.keys(outputMap)[0]];
-                    const boxes = postprocessYoloOutput(outputTensor.data, w, h, 0.45);
-                    
-                    let maxConf = -1;
-                    boxes.forEach(box => {
-                        if (box.score > maxConf) {
-                            maxConf = box.score;
-                            predictedClassId = box.classId;
-                        }
-                    });
-                }
-                
-                // Fallback to Heuristic/Ensemble if YOLOv8 fails or is in simulation mode
-                if (predictedClassId === -1) {
-                    const classification = classifyImageColorSignature(imgData.data, w, h, 'ensemble');
-                    predictedClassId = CLASS_KEYS.indexOf(classification.detectedPestId);
-                }
+            // Model engines: a photo with no prediction counts as wrong (no heuristic fallback)
+            if (state.activeEngine === 'resnet') {
+                const result = await runResnet18Classifier(offscreenCanvas);
+                predictedClassId = result.pestId ? CLASS_KEYS.indexOf(result.pestId) : -1;
+            } else if (state.activeEngine === 'roboflow') {
+                const boxes = await runRoboflowYolov5(offscreenCanvas);
+                const top = boxes.reduce((best, b) => (!best || b.score > best.score ? b : best), null);
+                predictedClassId = top ? CLASS_KEYS.indexOf(top.pestId) : -1;
             } else {
                 const classification = classifyImageColorSignature(imgData.data, w, h, state.activeEngine);
                 predictedClassId = CLASS_KEYS.indexOf(classification.detectedPestId);
@@ -1872,27 +1828,14 @@ async function runServerDatasetValidation() {
             const startInf = performance.now();
             let predictedClassId = -1;
 
-            if (state.activeEngine === 'yolov8') {
-                if (state.yoloModelStatus === 'loaded' && window.yoloSession) {
-                    const inputData = preprocessCanvasForYolo(offscreenCanvas);
-                    const inputTensor = new ort.Tensor('float32', inputData, [1, 3, 640, 640]);
-                    const outputMap = await window.yoloSession.run({ images: inputTensor });
-                    const outputTensor = outputMap[Object.keys(outputMap)[0]];
-                    const boxes = postprocessYoloOutput(outputTensor.data, w, h, 0.45);
-                    
-                    let maxConf = -1;
-                    boxes.forEach(box => {
-                        if (box.score > maxConf) {
-                            maxConf = box.score;
-                            predictedClassId = box.classId;
-                        }
-                    });
-                }
-                
-                if (predictedClassId === -1) {
-                    const classification = classifyImageColorSignature(imgData.data, w, h, 'ensemble');
-                    predictedClassId = CLASS_KEYS.indexOf(classification.detectedPestId);
-                }
+            // Model engines: a photo with no prediction counts as wrong (no heuristic fallback)
+            if (state.activeEngine === 'resnet') {
+                const result = await runResnet18Classifier(offscreenCanvas);
+                predictedClassId = result.pestId ? CLASS_KEYS.indexOf(result.pestId) : -1;
+            } else if (state.activeEngine === 'roboflow') {
+                const boxes = await runRoboflowYolov5(offscreenCanvas);
+                const top = boxes.reduce((best, b) => (!best || b.score > best.score ? b : best), null);
+                predictedClassId = top ? CLASS_KEYS.indexOf(top.pestId) : -1;
             } else {
                 const classification = classifyImageColorSignature(imgData.data, w, h, state.activeEngine);
                 predictedClassId = CLASS_KEYS.indexOf(classification.detectedPestId);
